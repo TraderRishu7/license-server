@@ -1,13 +1,15 @@
 const express = require('express');
-const fs = require('fs').promises;  // Use Promise version for async/await
+const fs = require('fs').promises;
 const cors = require('cors');
 const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const ADMIN_SECRET = process.env.ADMIN_SECRET || 'RishuAdmin';
 
 const KEYS_FILE = path.join(__dirname, 'keys.json');
 const USERS_FILE = path.join(__dirname, 'users.json');
+const LOGIN_ATTEMPTS_FILE = path.join(__dirname, 'loginAttempts.json');
 
 app.use(cors());
 app.use(express.json());
@@ -16,12 +18,17 @@ app.use(express.json());
 let keys = require(KEYS_FILE);
 let users = require(USERS_FILE);
 
+let loginAttempts = [];
+
 // Utility functions to save files
 async function saveKeys() {
   await fs.writeFile(KEYS_FILE, JSON.stringify(keys, null, 2), 'utf-8');
 }
 async function saveUsers() {
   await fs.writeFile(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
+}
+async function saveLoginAttempts() {
+  await fs.writeFile(LOGIN_ATTEMPTS_FILE, JSON.stringify(loginAttempts, null, 2), 'utf-8');
 }
 
 // 🔐 Key-based login
@@ -33,7 +40,7 @@ app.post('/verify-key', (req, res) => {
   res.json({ valid: isValid });
 });
 
-// 👤 Username/password login
+// 👤 Username/password login with loginAttempts tracking
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
@@ -43,6 +50,12 @@ app.post('/login', (req, res) => {
   const user = users.users.find(
     (u) => u.username === username && u.password === password
   );
+
+  loginAttempts.push({
+    username,
+    success: !!user,
+    timestamp: new Date().toISOString(),
+  });
 
   if (user) {
     res.json({ success: true, user: { username: user.username } });
@@ -56,11 +69,7 @@ app.get('/', (req, res) => {
   res.send('Auth server is running 🚀');
 });
 
-/**
- * Add a new user
- * POST /add-user
- * body: { username, password }
- */
+// Add a new user
 app.post('/add-user', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
@@ -81,11 +90,7 @@ app.post('/add-user', async (req, res) => {
   }
 });
 
-/**
- * Update a user's password
- * POST /update-user-password
- * body: { username, newPassword }
- */
+// Update a user's password
 app.post('/update-user-password', async (req, res) => {
   const { username, newPassword } = req.body;
   if (!username || !newPassword) {
@@ -107,11 +112,7 @@ app.post('/update-user-password', async (req, res) => {
   }
 });
 
-/**
- * Add a new key
- * POST /add-key
- * body: { key }
- */
+// Add a new key
 app.post('/add-key', async (req, res) => {
   const { key } = req.body;
   if (!key) return res.status(400).json({ success: false, error: 'Missing key' });
@@ -130,11 +131,7 @@ app.post('/add-key', async (req, res) => {
   }
 });
 
-/**
- * Remove a key
- * POST /remove-key
- * body: { key }
- */
+// Remove a key
 app.post('/remove-key', async (req, res) => {
   const { key } = req.body;
   if (!key) return res.status(400).json({ success: false, error: 'Missing key' });
@@ -154,10 +151,7 @@ app.post('/remove-key', async (req, res) => {
   }
 });
 
-/**
- * Reload data from disk
- * POST /reload-data
- */
+// Reload data from disk
 app.post('/reload-data', (req, res) => {
   try {
     delete require.cache[require.resolve(KEYS_FILE)];
@@ -169,6 +163,26 @@ app.post('/reload-data', (req, res) => {
     res.status(500).json({ success: false, error: 'Failed to reload data' });
   }
 });
+
+// Admin route to get login attempts (secured by ADMIN_SECRET in Authorization header)
+app.get('/admin/login-attempts', (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized: Missing or invalid Authorization header' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  if (token !== ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Forbidden: Invalid admin secret' });
+  }
+
+  res.json(loginAttempts);
+});
+
+// Periodically save login attempts every 60 seconds
+setInterval(() => {
+  saveLoginAttempts().catch(console.error);
+}, 60 * 1000);
 
 app.listen(PORT, () => {
   console.log(`License/auth server running at http://localhost:${PORT}`);
