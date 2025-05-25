@@ -1,18 +1,22 @@
 const express = require('express');
 const fs = require('fs');
 const cors = require('cors');
+const path = require('path');
 
 const app = express();
-const PORT = 3000;
-const KEYS_FILE = './keys.json';
+const PORT = process.env.PORT || 3000;
+
+const KEYS_FILE = path.join(__dirname, 'keys.json');
+const USERS_FILE = path.join(__dirname, 'users.json');
 
 app.use(cors());
 app.use(express.json());
 
-// Load keys
+// Load keys and users
 let keys = require(KEYS_FILE);
+let users = require(USERS_FILE);
 
-// Verify key endpoint
+// 🔐 Key-based login
 app.post('/verify-key', (req, res) => {
   const { key } = req.body;
   if (!key) return res.status(400).json({ valid: false, error: 'Missing key' });
@@ -21,18 +25,29 @@ app.post('/verify-key', (req, res) => {
   res.json({ valid: isValid });
 });
 
-// Update keys (e.g., via admin panel or script)
-app.post('/update-keys', (req, res) => {
-  const { newKeys } = req.body;
-  if (!Array.isArray(newKeys)) return res.status(400).json({ error: 'Invalid format' });
+// 👤 Username/password login
+app.post('/login', (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ success: false, error: 'Missing username or password' });
+  }
 
-  keys.validKeys = newKeys;
-  fs.writeFile(KEYS_FILE, JSON.stringify(keys, null, 2), err => {
-    if (err) return res.status(500).json({ error: 'Failed to save keys' });
-    res.json({ success: true, validKeys: keys.validKeys });
-  });
+  const user = users.users.find(
+    (u) => u.username === username && u.password === password
+  );
+
+  if (user) {
+    res.json({ success: true, user: { username: user.username } });
+  } else {
+    res.json({ success: false, error: 'Invalid credentials' });
+  }
+});
+
+// 🌐 Health check
+app.get('/', (req, res) => {
+  res.send('Auth server is running 🚀');
 });
 
 app.listen(PORT, () => {
-  console.log(`License server running at http://localhost:${PORT}`);
+  console.log(`License/auth server running at http://localhost:${PORT}`);
 });
