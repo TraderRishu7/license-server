@@ -186,6 +186,22 @@ app.post('/remove-key', async (req, res) => {
 });
 
 /**
+ * Get all users
+ * GET /users
+ */
+app.get('/users', (req, res) => {
+  res.json(users.users);
+});
+
+/**
+ * Get all keys
+ * GET /keys
+ */
+app.get('/keys', (req, res) => {
+  res.json(keys.validKeys);
+});
+
+/**
  * Reload data from disk
  * POST /reload-data
  */
