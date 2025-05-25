@@ -1,11 +1,10 @@
 const express = require('express');
-const fs = require('fs').promises;
+const fs = require('fs').promises;  // Use Promise version for async/await
 const cors = require('cors');
 const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const ADMIN_SECRET = process.env.ADMIN_SECRET || 'RishuAdmin';
 
 const KEYS_FILE = path.join(__dirname, 'keys.json');
 const USERS_FILE = path.join(__dirname, 'users.json');
@@ -18,7 +17,13 @@ app.use(express.json());
 let keys = require(KEYS_FILE);
 let users = require(USERS_FILE);
 
+// Load login attempts or init empty
 let loginAttempts = [];
+try {
+  loginAttempts = require(LOGIN_ATTEMPTS_FILE);
+} catch {
+  loginAttempts = [];
+}
 
 // Utility functions to save files
 async function saveKeys() {
@@ -40,24 +45,37 @@ app.post('/verify-key', (req, res) => {
   res.json({ valid: isValid });
 });
 
-// 👤 Username/password login with loginAttempts tracking
-app.post('/login', (req, res) => {
+// 👤 Username/password login
+app.post('/login', async (req, res) => {
+  const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || 
+             req.connection.remoteAddress || 
+             req.socket.remoteAddress || 
+             '';
   const { username, password } = req.body;
+
   if (!username || !password) {
     return res.status(400).json({ success: false, error: 'Missing username or password' });
   }
 
-  const user = users.users.find(
-    (u) => u.username === username && u.password === password
-  );
+  const user = users.users.find(u => u.username === username && u.password === password);
+  const loginSuccess = !!user;
 
+  // Record the login attempt
   loginAttempts.push({
-    username,
-    success: !!user,
-    timestamp: new Date().toISOString(),
+    timestamp: Date.now(),
+    username: username,
+    success: loginSuccess,
+    ip: ip
   });
 
-  if (user) {
+  // Save loginAttempts asynchronously
+  try {
+    await saveLoginAttempts();
+  } catch (err) {
+    console.error('Failed to save login attempts:', err);
+  }
+
+  if (loginSuccess) {
     res.json({ success: true, user: { username: user.username } });
   } else {
     res.json({ success: false, error: 'Invalid credentials' });
@@ -69,7 +87,11 @@ app.get('/', (req, res) => {
   res.send('Auth server is running 🚀');
 });
 
-// Add a new user
+/**
+ * Add a new user
+ * POST /add-user
+ * body: { username, password }
+ */
 app.post('/add-user', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
@@ -90,7 +112,11 @@ app.post('/add-user', async (req, res) => {
   }
 });
 
-// Update a user's password
+/**
+ * Update a user's password
+ * POST /update-user-password
+ * body: { username, newPassword }
+ */
 app.post('/update-user-password', async (req, res) => {
   const { username, newPassword } = req.body;
   if (!username || !newPassword) {
@@ -112,7 +138,11 @@ app.post('/update-user-password', async (req, res) => {
   }
 });
 
-// Add a new key
+/**
+ * Add a new key
+ * POST /add-key
+ * body: { key }
+ */
 app.post('/add-key', async (req, res) => {
   const { key } = req.body;
   if (!key) return res.status(400).json({ success: false, error: 'Missing key' });
@@ -131,7 +161,11 @@ app.post('/add-key', async (req, res) => {
   }
 });
 
-// Remove a key
+/**
+ * Remove a key
+ * POST /remove-key
+ * body: { key }
+ */
 app.post('/remove-key', async (req, res) => {
   const { key } = req.body;
   if (!key) return res.status(400).json({ success: false, error: 'Missing key' });
@@ -151,7 +185,10 @@ app.post('/remove-key', async (req, res) => {
   }
 });
 
-// Reload data from disk
+/**
+ * Reload data from disk
+ * POST /reload-data
+ */
 app.post('/reload-data', (req, res) => {
   try {
     delete require.cache[require.resolve(KEYS_FILE)];
@@ -164,25 +201,23 @@ app.post('/reload-data', (req, res) => {
   }
 });
 
-// Admin route to get login attempts (secured by ADMIN_SECRET in Authorization header)
-app.get('/admin/login-attempts', (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized: Missing or invalid Authorization header' });
-  }
+/**
+ * Admin: Get login attempts
+ * GET /admin/login-attempts
+ * Header: Authorization: Bearer <ADMIN_SECRET>
+ */
+const ADMIN_SECRET = process.env.ADMIN_SECRET || 'Rishuadmin';
 
-  const token = authHeader.split(' ')[1];
+app.get('/admin/login-attempts', (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.replace('Bearer ', '').trim();
+
   if (token !== ADMIN_SECRET) {
-    return res.status(403).json({ error: 'Forbidden: Invalid admin secret' });
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 
   res.json(loginAttempts);
 });
-
-// Periodically save login attempts every 60 seconds
-setInterval(() => {
-  saveLoginAttempts().catch(console.error);
-}, 60 * 1000);
 
 app.listen(PORT, () => {
   console.log(`License/auth server running at http://localhost:${PORT}`);
