@@ -1,8 +1,7 @@
 const express = require('express');
-const fs = require('fs').promises;
+const fs = require('fs').promises;  // Use Promise version for async/await
 const cors = require('cors');
 const path = require('path');
-const fetch = require('node-fetch');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,12 +25,18 @@ try {
   loginAttempts = [];
 }
 
-// Utility function to save login attempts only
+// Utility functions to save files
+async function saveKeys() {
+  await fs.writeFile(KEYS_FILE, JSON.stringify(keys, null, 2), 'utf-8');
+}
+async function saveUsers() {
+  await fs.writeFile(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
+}
 async function saveLoginAttempts() {
   await fs.writeFile(LOGIN_ATTEMPTS_FILE, JSON.stringify(loginAttempts, null, 2), 'utf-8');
 }
 
-// 🔐 Key-based login (just verify key exists in keys.json)
+// 🔐 Key-based login
 app.post('/verify-key', (req, res) => {
   const { key } = req.body;
   if (!key) return res.status(400).json({ valid: false, error: 'Missing key' });
@@ -40,7 +45,7 @@ app.post('/verify-key', (req, res) => {
   res.json({ valid: isValid });
 });
 
-// 👤 Username/password login (check against users.json)
+// 👤 Username/password login
 app.post('/login', async (req, res) => {
   const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || 
              req.connection.remoteAddress || 
@@ -83,6 +88,120 @@ app.get('/', (req, res) => {
 });
 
 /**
+ * Add a new user
+ * POST /add-user
+ * body: { username, password }
+ */
+app.post('/add-user', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ success: false, error: 'Missing username or password' });
+  }
+  
+  if (users.users.find(u => u.username === username)) {
+    return res.status(400).json({ success: false, error: 'Username already exists' });
+  }
+
+  users.users.push({ username, password });
+
+  try {
+    await saveUsers();
+    res.json({ success: true, message: 'User added successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Failed to save user' });
+  }
+});
+
+/**
+ * Update a user's password
+ * POST /update-user-password
+ * body: { username, newPassword }
+ */
+app.post('/update-user-password', async (req, res) => {
+  const { username, newPassword } = req.body;
+  if (!username || !newPassword) {
+    return res.status(400).json({ success: false, error: 'Missing username or new password' });
+  }
+
+  const user = users.users.find(u => u.username === username);
+  if (!user) {
+    return res.status(404).json({ success: false, error: 'User not found' });
+  }
+
+  user.password = newPassword;
+
+  try {
+    await saveUsers();
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Failed to save changes' });
+  }
+});
+
+/**
+ * Add a new key
+ * POST /add-key
+ * body: { key }
+ */
+app.post('/add-key', async (req, res) => {
+  const { key } = req.body;
+  if (!key) return res.status(400).json({ success: false, error: 'Missing key' });
+
+  if (keys.validKeys.includes(key)) {
+    return res.status(400).json({ success: false, error: 'Key already exists' });
+  }
+
+  keys.validKeys.push(key);
+
+  try {
+    await saveKeys();
+    res.json({ success: true, message: 'Key added successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Failed to save keys' });
+  }
+});
+
+/**
+ * Remove a key
+ * POST /remove-key
+ * body: { key }
+ */
+app.post('/remove-key', async (req, res) => {
+  const { key } = req.body;
+  if (!key) return res.status(400).json({ success: false, error: 'Missing key' });
+
+  const index = keys.validKeys.indexOf(key);
+  if (index === -1) {
+    return res.status(404).json({ success: false, error: 'Key not found' });
+  }
+
+  keys.validKeys.splice(index, 1);
+
+  try {
+    await saveKeys();
+    res.json({ success: true, message: 'Key removed successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Failed to save keys' });
+  }
+});
+
+/**
+ * Get all users
+ * GET /users
+ */
+app.get('/users', (req, res) => {
+  res.json(users.users);
+});
+
+/**
+ * Get all keys
+ * GET /keys
+ */
+app.get('/keys', (req, res) => {
+  res.json(keys.validKeys);
+});
+
+/**
  * Reload data from disk
  * POST /reload-data
  */
@@ -116,34 +235,6 @@ app.get('/admin/login-attempts', (req, res) => {
   res.json(loginAttempts);
 });
 
-/**
- * Proxy endpoint for Quotex signals
- */
-app.get('/proxy-signals', async (req, res) => {
-  try {
-    const { start_time, end_time, assets, day } = req.query;
-
-    if (!start_time || !end_time || !assets || !day) {
-      return res.status(400).json({ error: 'Missing required query parameters' });
-    }
-
-    const apiUrl = `https://quotexapi.itssrishu07.workers.dev/?start_time=${encodeURIComponent(start_time)}&end_time=${encodeURIComponent(end_time)}&assets=${encodeURIComponent(assets)}&day=${encodeURIComponent(day)}`;
-
-    const response = await fetch(apiUrl);
-
-    if (!response.ok) {
-      return res.status(response.status).json({ error: 'Failed to fetch from external API' });
-    }
-
-    const data = await response.json();
-
-    res.json(data);
-  } catch (error) {
-    console.error('Proxy error:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
-
 app.listen(PORT, () => {
-  console.log(`License/auth server running at http://localhost:${PORT}`);
-});
+  console.log(License/auth server running at http://localhost:${PORT});
+})
