@@ -1,5 +1,5 @@
 const express = require('express');
-const fs = require('fs').promises;  // Use Promise version for async/await
+const fs = require('fs').promises;
 const cors = require('cors');
 const path = require('path');
 
@@ -8,35 +8,13 @@ const PORT = process.env.PORT || 3000;
 
 const KEYS_FILE = path.join(__dirname, 'keys.json');
 const USERS_FILE = path.join(__dirname, 'users.json');
-const LOGIN_ATTEMPTS_FILE = path.join(__dirname, 'loginAttempts.json');
 
 app.use(cors());
 app.use(express.json());
 
-// Load keys and users
 let keys = require(KEYS_FILE);
 let users = require(USERS_FILE);
 
-// Load login attempts or init empty
-let loginAttempts = [];
-try {
-  loginAttempts = require(LOGIN_ATTEMPTS_FILE);
-} catch {
-  loginAttempts = [];
-}
-
-// Utility functions to save files
-async function saveKeys() {
-  await fs.writeFile(KEYS_FILE, JSON.stringify(keys, null, 2), 'utf-8');
-}
-async function saveUsers() {
-  await fs.writeFile(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
-}
-async function saveLoginAttempts() {
-  await fs.writeFile(LOGIN_ATTEMPTS_FILE, JSON.stringify(loginAttempts, null, 2), 'utf-8');
-}
-
-// 🔐 Key-based login
 app.post('/verify-key', (req, res) => {
   const { key } = req.body;
   if (!key) return res.status(400).json({ valid: false, error: 'Missing key' });
@@ -45,12 +23,7 @@ app.post('/verify-key', (req, res) => {
   res.json({ valid: isValid });
 });
 
-// 👤 Username/password login
-app.post('/login', async (req, res) => {
-  const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || 
-             req.connection.remoteAddress || 
-             req.socket.remoteAddress || 
-             '';
+app.post('/login', (req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
@@ -58,153 +31,18 @@ app.post('/login', async (req, res) => {
   }
 
   const user = users.users.find(u => u.username === username && u.password === password);
-  const loginSuccess = !!user;
 
-  // Record the login attempt
-  loginAttempts.push({
-    timestamp: Date.now(),
-    username: username,
-    success: loginSuccess,
-    ip: ip
-  });
-
-  // Save loginAttempts asynchronously
-  try {
-    await saveLoginAttempts();
-  } catch (err) {
-    console.error('Failed to save login attempts:', err);
-  }
-
-  if (loginSuccess) {
+  if (user) {
     res.json({ success: true, user: { username: user.username } });
   } else {
     res.json({ success: false, error: 'Invalid credentials' });
   }
 });
 
-// 🌐 Health check
 app.get('/', (req, res) => {
   res.send('Auth server is running 🚀');
 });
 
-/**
- * Add a new user
- * POST /add-user
- * body: { username, password }
- */
-app.post('/add-user', async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) {
-    return res.status(400).json({ success: false, error: 'Missing username or password' });
-  }
-  
-  if (users.users.find(u => u.username === username)) {
-    return res.status(400).json({ success: false, error: 'Username already exists' });
-  }
-
-  users.users.push({ username, password });
-
-  try {
-    await saveUsers();
-    res.json({ success: true, message: 'User added successfully' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: 'Failed to save user' });
-  }
-});
-
-/**
- * Update a user's password
- * POST /update-user-password
- * body: { username, newPassword }
- */
-app.post('/update-user-password', async (req, res) => {
-  const { username, newPassword } = req.body;
-  if (!username || !newPassword) {
-    return res.status(400).json({ success: false, error: 'Missing username or new password' });
-  }
-
-  const user = users.users.find(u => u.username === username);
-  if (!user) {
-    return res.status(404).json({ success: false, error: 'User not found' });
-  }
-
-  user.password = newPassword;
-
-  try {
-    await saveUsers();
-    res.json({ success: true, message: 'Password updated successfully' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: 'Failed to save changes' });
-  }
-});
-
-/**
- * Add a new key
- * POST /add-key
- * body: { key }
- */
-app.post('/add-key', async (req, res) => {
-  const { key } = req.body;
-  if (!key) return res.status(400).json({ success: false, error: 'Missing key' });
-
-  if (keys.validKeys.includes(key)) {
-    return res.status(400).json({ success: false, error: 'Key already exists' });
-  }
-
-  keys.validKeys.push(key);
-
-  try {
-    await saveKeys();
-    res.json({ success: true, message: 'Key added successfully' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: 'Failed to save keys' });
-  }
-});
-
-/**
- * Remove a key
- * POST /remove-key
- * body: { key }
- */
-app.post('/remove-key', async (req, res) => {
-  const { key } = req.body;
-  if (!key) return res.status(400).json({ success: false, error: 'Missing key' });
-
-  const index = keys.validKeys.indexOf(key);
-  if (index === -1) {
-    return res.status(404).json({ success: false, error: 'Key not found' });
-  }
-
-  keys.validKeys.splice(index, 1);
-
-  try {
-    await saveKeys();
-    res.json({ success: true, message: 'Key removed successfully' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: 'Failed to save keys' });
-  }
-});
-
-/**
- * Get all users
- * GET /users
- */
-app.get('/users', (req, res) => {
-  res.json(users.users);
-});
-
-/**
- * Get all keys
- * GET /keys
- */
-app.get('/keys', (req, res) => {
-  res.json(keys.validKeys);
-});
-
-/**
- * Reload data from disk
- * POST /reload-data
- */
 app.post('/reload-data', (req, res) => {
   try {
     delete require.cache[require.resolve(KEYS_FILE)];
@@ -217,24 +55,6 @@ app.post('/reload-data', (req, res) => {
   }
 });
 
-/**
- * Admin: Get login attempts
- * GET /admin/login-attempts
- * Header: Authorization: Bearer <ADMIN_SECRET>
- */
-const ADMIN_SECRET = process.env.ADMIN_SECRET || 'Rishuadmin';
-
-app.get('/admin/login-attempts', (req, res) => {
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.replace('Bearer ', '').trim();
-
-  if (token !== ADMIN_SECRET) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  res.json(loginAttempts);
-});
-
 app.listen(PORT, () => {
-  console.log(License/auth server running at http://localhost:${PORT});
-})
+  console.log(`Auth server running at http://localhost:${PORT}`);
+});
