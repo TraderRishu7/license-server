@@ -60,7 +60,7 @@ app.post('/reload-data', (req, res) => {
   }
 });
 
-// --- NEW: SIGNAL API ROUTE ---
+// --- FIXED: SIGNAL API ROUTE ---
 app.get('/api/signals', async (req, res) => {
   const { start_time, end_time, assets, day } = req.query;
 
@@ -72,14 +72,25 @@ app.get('/api/signals', async (req, res) => {
 
   try {
     const response = await fetch(apiUrl);
-    if (!response.ok) throw new Error(`API error: ${response.status}`);
     const text = await response.text();
+
+    // Log for debugging
+    console.log(`Response from Quotex API (status ${response.status}):`, text);
+
+    if (!response.ok) {
+      return res.status(502).json({
+        error: `Quotex API returned status ${response.status}`,
+        details: text
+      });
+    }
+
     res.send(text);
   } catch (err) {
-    console.error('Error fetching signals:', err);
-    res.status(500).json({ error: 'Failed to fetch signals' });
+    console.error('Internal fetch error:', err.message);
+    res.status(500).json({ error: 'Internal Server Error', details: err.message });
   }
 });
+
 
 // --- START SERVER ---
 app.listen(PORT, () => {
