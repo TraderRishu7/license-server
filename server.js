@@ -2,7 +2,9 @@ const express = require('express');
 const fs = require('fs').promises;
 const cors = require('cors');
 const path = require('path');
-const fetch = require('node-fetch'); // required if you're on Node.js <18
+
+// Dynamic import for node-fetch (v3+) in CommonJS environment
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -60,7 +62,7 @@ app.post('/reload-data', (req, res) => {
   }
 });
 
-// --- FIXED: SIGNAL API ROUTE ---
+// --- SIGNAL API ROUTE ---
 app.get('/api/signals', async (req, res) => {
   const { start_time, end_time, assets, day } = req.query;
 
@@ -74,7 +76,6 @@ app.get('/api/signals', async (req, res) => {
     const response = await fetch(apiUrl);
     const text = await response.text();
 
-    // Log for debugging
     console.log(`Response from Quotex API (status ${response.status}):`, text);
 
     if (!response.ok) {
@@ -90,7 +91,6 @@ app.get('/api/signals', async (req, res) => {
     res.status(500).json({ error: 'Internal Server Error', details: err.message });
   }
 });
-
 
 // --- START SERVER ---
 app.listen(PORT, () => {
