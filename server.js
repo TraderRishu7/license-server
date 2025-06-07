@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs').promises;
 const cors = require('cors');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 
 // Dynamic import for node-fetch (v3+) in CommonJS environment
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
@@ -12,11 +13,39 @@ const PORT = process.env.PORT || 3000;
 const KEYS_FILE = path.join(__dirname, 'keys.json');
 const USERS_FILE = path.join(__dirname, 'users.json');
 
-app.use(cors());
-app.use(express.json());
-
 let keys = require(KEYS_FILE);
 let users = require(USERS_FILE);
+
+// --- CORS Setup ---
+const allowedOrigins = ['https://rishupremium.web.app']; // Replace with your frontend URL
+
+app.use(cors({
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like curl, Postman) or check if origin is allowed
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('Not allowed by CORS'));
+    }
+  }
+}));
+
+// --- Rate Limiter for /api/signals ---
+const signalsLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30,             // max 30 requests per IP per windowMs
+  message: { error: 'Too many requests, please try again later.' }
+});
+
+app.use(express.json());
+
+app.use((err, req, res, next) => {
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({ error: 'CORS error: This origin is not allowed' });
+  }
+  next(err);
+});
 
 // --- KEY VERIFICATION ---
 app.post('/verify-key', (req, res) => {
@@ -63,7 +92,8 @@ app.post('/reload-data', (req, res) => {
 });
 
 // --- SIGNAL API ROUTE ---
-app.get('/api/signals', async (req, res) => {
+// Add rate limiter middleware here
+app.get('/api/signals', signalsLimiter, async (req, res) => {
   const { start_time, end_time, assets, day } = req.query;
 
   if (!start_time || !end_time || !assets || !day) {
