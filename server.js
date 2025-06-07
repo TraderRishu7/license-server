@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs').promises;
 const cors = require('cors');
 const path = require('path');
+const fetch = require('node-fetch'); // required if you're on Node.js <18
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,6 +16,7 @@ app.use(express.json());
 let keys = require(KEYS_FILE);
 let users = require(USERS_FILE);
 
+// --- KEY VERIFICATION ---
 app.post('/verify-key', (req, res) => {
   const { key } = req.body;
   if (!key) return res.status(400).json({ valid: false, error: 'Missing key' });
@@ -23,6 +25,7 @@ app.post('/verify-key', (req, res) => {
   res.json({ valid: isValid });
 });
 
+// --- LOGIN ---
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
 
@@ -39,10 +42,12 @@ app.post('/login', (req, res) => {
   }
 });
 
+// --- HOME ---
 app.get('/', (req, res) => {
   res.send('Auth server is running 🚀');
 });
 
+// --- RELOAD DATA (keys and users) ---
 app.post('/reload-data', (req, res) => {
   try {
     delete require.cache[require.resolve(KEYS_FILE)];
@@ -55,6 +60,28 @@ app.post('/reload-data', (req, res) => {
   }
 });
 
+// --- NEW: SIGNAL API ROUTE ---
+app.get('/api/signals', async (req, res) => {
+  const { start_time, end_time, assets, day } = req.query;
+
+  if (!start_time || !end_time || !assets || !day) {
+    return res.status(400).json({ error: 'Missing required parameters' });
+  }
+
+  const apiUrl = `https://quotexapi.itssrishu07.workers.dev/?start_time=${encodeURIComponent(start_time)}&end_time=${encodeURIComponent(end_time)}&assets=${encodeURIComponent(assets)}&day=${encodeURIComponent(day)}`;
+
+  try {
+    const response = await fetch(apiUrl);
+    if (!response.ok) throw new Error(`API error: ${response.status}`);
+    const text = await response.text();
+    res.send(text);
+  } catch (err) {
+    console.error('Error fetching signals:', err);
+    res.status(500).json({ error: 'Failed to fetch signals' });
+  }
+});
+
+// --- START SERVER ---
 app.listen(PORT, () => {
-  console.log(`Auth server running at http://localhost:${PORT}`);
+  console.log(`Auth + Signal server running at http://localhost:${PORT}`);
 });
