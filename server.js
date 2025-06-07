@@ -4,7 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
 
-// Dynamic import for node-fetch (v3+) in CommonJS environment
+// Dynamic import for node-fetch
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const app = express();
@@ -16,30 +16,31 @@ const USERS_FILE = path.join(__dirname, 'users.json');
 let keys = require(KEYS_FILE);
 let users = require(USERS_FILE);
 
-// --- CORS Setup ---
-const allowedOrigins = ['https://rishupremium.web.app']; // Replace with your frontend URL
+// --- CONFIG ---
+const ALLOWED_ORIGIN = 'https://rishupremium.web.app';
+const TRUSTED_HEADER = 'rishu-secret';
 
+// --- CORS ---
 app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like curl, Postman) or check if origin is allowed
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      return callback(null, true);
+  origin: function (origin, callback) {
+    if (!origin || origin === ALLOWED_ORIGIN) {
+      callback(null, true);
     } else {
-      return callback(new Error('Not allowed by CORS'));
+      callback(new Error('Not allowed by CORS'));
     }
   }
 }));
 
-// --- Rate Limiter for /api/signals ---
-const signalsLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 30,             // max 30 requests per IP per windowMs
-  message: { error: 'Too many requests, please try again later.' }
-});
-
 app.use(express.json());
 
+// --- Rate Limiter ---
+const signalsLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30,
+  message: { error: 'Too many requests, try again later.' }
+});
+
+// --- Global Error Handler ---
 app.use((err, req, res, next) => {
   if (err.message === 'Not allowed by CORS') {
     return res.status(403).json({ error: 'CORS error: This origin is not allowed' });
@@ -47,7 +48,33 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
-// --- KEY VERIFICATION ---
+// --- Middleware to block Postman/curl + require custom header ---
+app.use('/api/signals', signalsLimiter, (req, res, next) => {
+  const userAgent = req.headers['user-agent'] || '';
+  const origin = req.headers.origin || '';
+  const referer = req.headers.referer || '';
+  const secretHeader = req.headers['x-trusted-client'];
+
+  const isBlockedAgent = /postman|curl|httpie|insomnia/i.test(userAgent);
+  const isValidOrigin = origin === ALLOWED_ORIGIN || referer.startsWith(ALLOWED_ORIGIN);
+  const hasValidHeader = secretHeader === TRUSTED_HEADER;
+
+  if (isBlockedAgent) {
+    return res.status(403).json({ error: 'Forbidden: Suspicious User-Agent' });
+  }
+
+  if (!isValidOrigin) {
+    return res.status(403).json({ error: 'Forbidden: Invalid origin or referer' });
+  }
+
+  if (!hasValidHeader) {
+    return res.status(403).json({ error: 'Forbidden: Missing or invalid client header' });
+  }
+
+  next();
+});
+
+// --- API Routes ---
 app.post('/verify-key', (req, res) => {
   const { key } = req.body;
   if (!key) return res.status(400).json({ valid: false, error: 'Missing key' });
@@ -56,16 +83,13 @@ app.post('/verify-key', (req, res) => {
   res.json({ valid: isValid });
 });
 
-// --- LOGIN ---
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
-
   if (!username || !password) {
     return res.status(400).json({ success: false, error: 'Missing username or password' });
   }
 
   const user = users.users.find(u => u.username === username && u.password === password);
-
   if (user) {
     res.json({ success: true, user: { username: user.username } });
   } else {
@@ -73,12 +97,10 @@ app.post('/login', (req, res) => {
   }
 });
 
-// --- HOME ---
 app.get('/', (req, res) => {
   res.send('Auth server is running 🚀');
 });
 
-// --- RELOAD DATA (keys and users) ---
 app.post('/reload-data', (req, res) => {
   try {
     delete require.cache[require.resolve(KEYS_FILE)];
@@ -91,9 +113,8 @@ app.post('/reload-data', (req, res) => {
   }
 });
 
-// --- SIGNAL API ROUTE ---
-// Add rate limiter middleware here
-app.get('/api/signals', signalsLimiter, async (req, res) => {
+// --- Protected Signal API ---
+app.get('/api/signals', async (req, res) => {
   const { start_time, end_time, assets, day } = req.query;
 
   if (!start_time || !end_time || !assets || !day) {
@@ -106,11 +127,9 @@ app.get('/api/signals', signalsLimiter, async (req, res) => {
     const response = await fetch(apiUrl);
     const text = await response.text();
 
-    console.log(`Response from Quotex API (status ${response.status}):`, text);
-
     if (!response.ok) {
       return res.status(502).json({
-        error: `Quotex API returned status ${response.status}`,
+        error: `Quotex API error (status ${response.status})`,
         details: text
       });
     }
@@ -122,7 +141,7 @@ app.get('/api/signals', signalsLimiter, async (req, res) => {
   }
 });
 
-// --- START SERVER ---
+// --- Start Server ---
 app.listen(PORT, () => {
   console.log(`Auth + Signal server running at http://localhost:${PORT}`);
 });
