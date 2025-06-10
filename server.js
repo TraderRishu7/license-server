@@ -141,6 +141,35 @@ app.get('/api/signals', async (req, res) => {
   }
 });
 
+// Proxy route for Binomo API signals
+app.get('/api/binomo-signals', async (req, res) => {
+  const { asset, days, accuracy, start_time, end_time } = req.query;
+
+  if (!asset || !days || !accuracy || !start_time || !end_time) {
+    return res.status(400).json({ error: 'Missing required parameters' });
+  }
+
+  const apiUrl = `https://binomoapi.itssrishu07.workers.dev/?asset=${encodeURIComponent(asset)}&days=${encodeURIComponent(days)}&accuracy=${encodeURIComponent(accuracy)}&start_time=${encodeURIComponent(start_time)}&end_time=${encodeURIComponent(end_time)}`;
+
+  try {
+    const response = await fetch(apiUrl);
+    const text = await response.text();
+
+    if (!response.ok) {
+      return res.status(502).json({
+        error: `Binomo API error (status ${response.status})`,
+        details: text
+      });
+    }
+
+    res.send(text);
+  } catch (err) {
+    console.error('Internal fetch error:', err.message);
+    res.status(500).json({ error: 'Internal Server Error', details: err.message });
+  }
+});
+
+
 // --- Start Server ---
 app.listen(PORT, () => {
   console.log(`Auth + Signal server running at http://localhost:${PORT}`);
