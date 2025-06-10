@@ -17,13 +17,16 @@ let keys = require(KEYS_FILE);
 let users = require(USERS_FILE);
 
 // --- CONFIG ---
-const ALLOWED_ORIGIN = 'https://rishupremium.web.app';
+const ALLOWED_ORIGINS = [
+  'https://rishupremium.web.app',
+  'https://rishucryptoidx.web.app'
+];
 const TRUSTED_HEADER = 'rishu-secret';
 
 // --- CORS ---
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || origin === ALLOWED_ORIGIN) {
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -56,10 +59,11 @@ app.use('/api/signals', signalsLimiter, (req, res, next) => {
   const secretHeader = req.headers['x-trusted-client'];
 
   const isBlockedAgent = /postman|curl|httpie|insomnia/i.test(userAgent);
-  const isValidOrigin = origin === ALLOWED_ORIGIN || referer.startsWith(ALLOWED_ORIGIN);
+  const isValidOrigin = ALLOWED_ORIGINS.includes(origin) || (referer && ALLOWED_ORIGINS.some(o => referer.startsWith(o)));
   const hasValidHeader = secretHeader === TRUSTED_HEADER;
 
   if (isBlockedAgent) {
+    console.warn(`Blocked suspicious user-agent: ${userAgent} from IP: ${req.ip}`);
     return res.status(403).json({ error: 'Forbidden: Suspicious User-Agent' });
   }
 
@@ -101,15 +105,13 @@ app.get('/', (req, res) => {
   res.send('Auth server is running 🚀');
 });
 
-app.post('/reload-data', (req, res) => {
+app.post('/reload-data', async (req, res) => {
   try {
-    delete require.cache[require.resolve(KEYS_FILE)];
-    delete require.cache[require.resolve(USERS_FILE)];
-    keys = require(KEYS_FILE);
-    users = require(USERS_FILE);
+    keys = JSON.parse(await fs.readFile(KEYS_FILE, 'utf-8'));
+    users = JSON.parse(await fs.readFile(USERS_FILE, 'utf-8'));
     res.json({ success: true, message: 'Data reloaded from disk' });
   } catch (err) {
-    res.status(500).json({ success: false, error: 'Failed to reload data' });
+    res.status(500).json({ success: false, error: 'Failed to reload data', details: err.message });
   }
 });
 
@@ -168,7 +170,6 @@ app.get('/api/binomo-signals', async (req, res) => {
     res.status(500).json({ error: 'Internal Server Error', details: err.message });
   }
 });
-
 
 // --- Start Server ---
 app.listen(PORT, () => {
