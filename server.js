@@ -10,11 +10,15 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// --- FILE PATHS ---
 const KEYS_FILE = path.join(__dirname, 'keys.json');
 const USERS_FILE = path.join(__dirname, 'users.json');
+const TRADERS_FILE = path.join(__dirname, 'traders.json');
 
+// --- INITIAL DATA LOAD ---
 let keys = require(KEYS_FILE);
 let users = require(USERS_FILE);
+let traders = require(TRADERS_FILE);
 
 // --- CONFIG ---
 const ALLOWED_ORIGINS = [
@@ -38,7 +42,7 @@ app.use(express.json());
 
 // --- Rate Limiter ---
 const signalsLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
+  windowMs: 60 * 1000,
   max: 30,
   message: { error: 'Too many requests, try again later.' }
 });
@@ -101,6 +105,20 @@ app.post('/login', (req, res) => {
   }
 });
 
+app.post('/login-trader', (req, res) => {
+  const { traderId } = req.body;
+  if (!traderId) {
+    return res.status(400).json({ success: false, error: 'Missing trader ID' });
+  }
+
+  const isValid = traders.traders.some(t => t.traderId === traderId);
+  if (isValid) {
+    res.json({ success: true, traderId });
+  } else {
+    res.json({ success: false, error: 'Invalid trader ID' });
+  }
+});
+
 app.get('/', (req, res) => {
   res.send('Auth server is running 🚀');
 });
@@ -109,6 +127,7 @@ app.post('/reload-data', async (req, res) => {
   try {
     keys = JSON.parse(await fs.readFile(KEYS_FILE, 'utf-8'));
     users = JSON.parse(await fs.readFile(USERS_FILE, 'utf-8'));
+    traders = JSON.parse(await fs.readFile(TRADERS_FILE, 'utf-8'));
     res.json({ success: true, message: 'Data reloaded from disk' });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Failed to reload data', details: err.message });
@@ -143,7 +162,6 @@ app.get('/api/signals', async (req, res) => {
   }
 });
 
-// Proxy route for Binomo API signals
 app.get('/api/binomo-signals', async (req, res) => {
   const { asset, days, accuracy, start_time, end_time } = req.query;
 
